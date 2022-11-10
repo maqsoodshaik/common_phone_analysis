@@ -52,8 +52,9 @@ def codes_low_high(audio_path,xlsr_codes):
     return low_lst,high_lst
 def val_ret(lst,val):
     return lst[next(x[0]-1 for x in enumerate(lst) if x[1] > val)]
-def phn_ind(min,max,phn,low_lst,high_lst,mdl_out,pkl_path,phn_dict ={}):
-
+def phn_ind(min,max,phn,low_lst,high_lst,mdl_out,pkl_path):
+    phn_dict ={}
+    print(f'{pkl_path}')
     for val,p in enumerate(phn):
         l = val_ret(low_lst,int(min[val]))
         if val < len(phn)-1:
@@ -73,18 +74,18 @@ def phn_ind(min,max,phn,low_lst,high_lst,mdl_out,pkl_path,phn_dict ={}):
 def phn_dict_generator(save_path,dataset_path,codebook,feature_extractor,model):
     for subdir, dirs, files in os.walk(dataset_path):
         for file in files:
-            if (".wav" in file):
+            if (".wav" in file) and file.startswith('common_voice'):
                 mdl_out = model_output(audio_path = subdir+'/'+file,codebook = codebook,feature_extractor = feature_extractor,model=model)
                 low_lst,high_lst = codes_low_high(subdir+'/'+file,mdl_out)
                 pth_var = "/".join(list(subdir.split('/')[:-1])+['grids'])+"/"+file.split('.')[0]
                 text_grid_path = pth_var+'.TextGrid'
-                pkl_path = save_path+"/".join(pth_var.split("/")[1:])+'.pkl'
+                pkl_path = save_path+"/".join(pth_var.split("/")[-3:])+'.pkl'
                 low,high,phns=get_phn_mapping(text_grid_path)
                 phn_ind(low,high,phns,low_lst,high_lst,mdl_out,pkl_path)
 if __name__ == "__main__":
-    dataset_path = "CP"
-    codebook  =1
-    save_path = f"CP_wav2vec2_pkl/codebook_{codebook}/"
+    dataset_path = "/corpora/common_phone"
+    codebook  =2
+    save_path = f"/corpora/common_phone_analysis/CP_wav2vec2_pkl/codebook_{codebook}/"
     feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base")
     model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-base")
     phn_dict_generator(save_path,dataset_path,codebook,feature_extractor,model)
