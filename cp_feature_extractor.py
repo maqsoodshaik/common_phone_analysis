@@ -83,10 +83,11 @@ def phn_dict_generator(save_path,dataset_path,codebook,feature_extractor,model):
                 low,high,phns=get_phn_mapping(text_grid_path)
                 phn_ind(low,high,phns,low_lst,high_lst,mdl_out,pkl_path)
 if __name__ == "__main__":
-    dataset_path = "/corpora/common_phone"
+    dataset_path = "/corpora/common_phone/"
     codebook  =2
-    save_path = f"/corpora/common_phone_analysis/CP_wav2vec2_pkl/codebook_{codebook}/"
-    feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-    model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-base")
+    save_path = f"/corpora/common_phone_analysis/large/CP_wav2vec2_pkl/codebook_{codebook}/"
+    feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-large")
+    model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-large")
+    print(model)
     phn_dict_generator(save_path,dataset_path,codebook,feature_extractor,model)
     print("end")
