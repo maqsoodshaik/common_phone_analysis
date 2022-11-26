@@ -10,6 +10,7 @@ imports
 """
 
 import os
+from sklearn.metrics import confusion_matrix
 import pickle
 import sim
 import matplotlib.pyplot as plt
@@ -176,13 +177,23 @@ def lang_pred(mdl_out,lang,folder_name):
             sample_num = pickle.load(f)
         prb_class[l] = prb+math.log(sample_num[l]/sum(sample_num.values()))
     #key of maximum value of prb_class is the predicted language
-    return max(prb_class, key=prb_class.get)
+    prb_class_val = {}
+    prb_class_val_ret = {}
+    #prb_class values to probability to store in prb_class_val without using math.exp
+    for k,v in prb_class.items():
+        prb_class_val[k] = v-max(prb_class.values())
+    for key,val in prb_class_val.items():
+        prb_class_val_ret[key] = math.exp(val)/sum([math.exp(i) for i in prb_class_val.values()])
+    return max(prb_class, key=prb_class.get),prb_class_val_ret
 
 def main(lang,folder_name, dataset_path): 
-    feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-base")
-    model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-base")
+    feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/wav2vec2-large-xlsr-53")
+    model = Wav2Vec2ForPreTraining.from_pretrained("facebook/wav2vec2-large-xlsr-53")
     accuracy = 0
     num_files = 0
+    pred_languages = []
+    actual_languages= []
+    cf_prb_m = {}
     for subdir, dirs, files in os.walk(dataset_path):
         for file in files:
             if file == "test.csv":
@@ -197,19 +208,61 @@ def main(lang,folder_name, dataset_path):
                     codebook = 2
                     mdl_out_cd_2 = model_output(audio_path = audio_path,codebook = codebook,feature_extractor = feature_extractor,model=model)
                     mdl_out = mdl_out_cd_1+np.array(np.array(mdl_out_cd_2)+320).tolist()
-                    pred_lang = lang_pred(mdl_out,lang,folder_name)
+                    pred_lang,prb_class_val_ret = lang_pred(mdl_out,lang,folder_name)
+                    
+                    #adding dictionaries prb_class_val_ret and cf_prb_m
+                    cf_prb_m = {k: cf_prb_m.get(k, 0) + prb_class_val_ret.get(k, 0) for k in set(cf_prb_m) | set(prb_class_val_ret)}
+                    pred_languages.append(pred_lang)
+                    actual_languages.append(subdir.split('/')[-1])
                     if pred_lang == subdir.split('/')[-1]:
                         accuracy+=1
                     else:
                         # print(f"actual:{subdir.split('/')[-1]} predicted:{pred_lang}")
                         pass
                     num_files+=1
+    #divide the values of cf_prb_m by the number of files
+    cf_prb_m = {k: v/num_files for k, v in cf_prb_m.items()}
+    
     print(f"accuracy using model {folder_name} is {accuracy/num_files}")
-    return accuracy/num_files
+    return accuracy/num_files,pred_languages,actual_languages,cf_prb_m
 if  __name__ == "__main__":
     # write_prb(lang=["de","en","es","fr","it","ru"],folder_name= "CP_wav2vec2_pkl",dataset_path = "/corpora/common_phone")
+    folder_name = "CP_xlsr_pkl"
     lang = ["de","en","es","fr","it","ru"]
+    pred_language = []
+    actual_language = [] 
+    cf_prbs_m = {}
     for l in lang:
         print("accuracy for language",l)
-        main(lang = ["de","en","es","fr","it","ru"],folder_name = "CP_wav2vec2_pkl", dataset_path = f"/corpora/common_phone/{l}")
-        
+        _,pred_language_r,actual_language_r,cf_prb_m = main(lang = ["de","en","es","fr","it","ru"],folder_name = folder_name, dataset_path = f"/corpora/common_phone/{l}")
+        cf_prbs_m[l] = cf_prb_m
+        pred_language+=pred_language_r
+        actual_language+=actual_language_r
+    #accuracy from pred_language and actual_language
+    accuracy = 0
+    for i in range(len(pred_language)):
+        if pred_language[i] == actual_language[i]:
+            accuracy+=1
+    print(f"accuracy using model {folder_name} is {accuracy/len(pred_language)}")
+    cf_m = confusion_matrix(actual_language, pred_language)
+    #plot confusion matrix cf_m with labels as lang list on x and y axis
+    plt.figure(figsize=(10,10))
+    sns.heatmap(cf_m, annot=True, fmt="d",xticklabels=lang, yticklabels=lang)
+    plt.title("Confusion matrix")
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.show()
+    #save the plot as png
+    plt.savefig(f"confusion_matrix_{folder_name}.png")
+    #plot cf_prbs_m as heatmap
+    plt.figure(figsize=(10,10))
+    #rearrange values of dictionary cf_prbs_m based on a list lang
+    for k,v in cf_prbs_m.items(): 
+        cf_prbs_m[k] =  {key:cf_prbs_m[k][key] for key in sorted(cf_prbs_m[k])}
+    sns.heatmap(pd.DataFrame(cf_prbs_m), annot=True, fmt="f",xticklabels=lang, yticklabels=lang)
+    plt.title("Confusion matrix probability")
+    plt.ylabel('True label') 
+    plt.xlabel('Predicted label')
+    plt.show()
+    #save the plot as png
+    plt.savefig(f"confusion_matrix_prob_{folder_name}.png")
