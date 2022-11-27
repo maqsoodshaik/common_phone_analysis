@@ -11,8 +11,14 @@ import numpy as np
 from cp_feature_extractor import model_output
 from sklearn.model_selection import train_test_split
 from transformers import AutoFeatureExtractor, Wav2Vec2ForPreTraining
-#set seed
-torch.manual_seed(0)
+#set manual seed for the packages
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+set_seed(0)
+
 import wandb
 # 1. Start a W&B run
 wandb.init(project='lstm_langmodel')
@@ -28,12 +34,12 @@ config = wandb.config
 config.batch_size = batch_size
 # 2. Save model inputs and hyperparameters
 config = wandb.config
-learning_rate = 0.001
+learning_rate = 0.00005
 config.learning_rate = learning_rate
-
-input_size = 1
+config.one_hot = True
+input_size = 640
 sequence_length = 560
-hidden_size = 64
+hidden_size = 1024
 config.hidden_size = hidden_size
 num_layers = 2
 config.num_layers  = num_layers
@@ -180,7 +186,10 @@ for epoch in range(num_epochs):
     for i, labels in enumerate(train_dataset_y):  
         # origin shape: [N, 1, 28, 28]
         # resized: [N, 28, 28]
-        images = torch.tensor(train_dataset_x[i],dtype=torch.float32).reshape(1,-1,1).to(device)
+        #one hot encoding for the train_dataset_x last dimension
+        inp = torch.nn.functional.one_hot(train_dataset_x[i], num_classes=input_size)
+            
+        images = torch.tensor(inp,dtype=torch.float32).reshape(1,-1,input_size).to(device)
         labels= labels.unsqueeze(0)
         labels= labels.type(torch.LongTensor).to(device)
         # Forward pass
@@ -211,7 +220,8 @@ for epoch in range(num_epochs):
         n_correct = 0
         n_samples = 0
         for i, labels in enumerate(test_dataset_y):
-            images =torch.tensor(test_dataset_x[i],dtype=torch.float32).reshape(1,-1,1).to(device)
+            inp = torch.nn.functional.one_hot(test_dataset_x[i], num_classes=input_size)
+            images =torch.tensor(inp,dtype=torch.float32).reshape(1,-1,input_size).to(device)
             labels = labels.to(device)
             labels= labels.type(torch.LongTensor)
             outputs = model(images)
