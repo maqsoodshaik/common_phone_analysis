@@ -1,13 +1,17 @@
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
 import pandas as pd
 from datasets import Dataset
 from transformers import get_scheduler
 import os
 import random
+import seaborn as sns
 import numpy as np
 from cp_feature_extractor import model_output
+from sklearn.metrics import f1_score
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from transformers import AutoFeatureExtractor, Wav2Vec2ForPreTraining
 #set manual seed for the packages
@@ -48,7 +52,7 @@ config.num_layers  = 2
 # MNIST dataset 
 lang = ["de","en","es","fr","it","ru"]
 num_classes = len(lang)
-model_checkpoint = "facebook/wav2vec2-large-xlsr-53"
+model_checkpoint = "facebook/wav2vec2-base"
 label2id, id2label,label2id_int = dict(), dict(),dict()
 for i, label in enumerate(lang):
     label2id[label] = torch.tensor(i)
@@ -70,9 +74,9 @@ def data_extract(model_checkpoint, dataset_path_m,file_to_extract):
             #yield dictioanry with the audio feature and the label
             yield {"input_values":torch.tensor(mdl_out).unsqueeze(dim = 0),"labels":torch.tensor(label2id[l]).unsqueeze(dim = 0)}
 #load_from_disk if train_dataset contains the data
-if os.path.exists("train_dataset")and os.path.exists("val_dataset") :
-    train_dataset = Dataset.load_from_disk("train_dataset")
-    val_dataset = Dataset.load_from_disk("val_dataset")
+if os.path.exists("train_dataset_wav2vec2")and os.path.exists("val_dataset_wav2vec2") :
+    train_dataset = Dataset.load_from_disk("train_dataset_wav2vec2")
+    val_dataset = Dataset.load_from_disk("val_dataset_wav2vec2")
     # test_dataset = Dataset.load_from_disk("test_dataset")
 else:
     file_to_extract = "train.csv"
@@ -108,7 +112,7 @@ train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
 #                                           shuffle=False)
 val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                             batch_size=config.batch_size,
-                                            shuffle=False,collate_fn=collate_fn,drop_last=Trueworker_init_fn=seed_worker,generator=g,)
+                                            shuffle=False,collate_fn=collate_fn,drop_last=True,worker_init_fn=seed_worker,generator=g,)
 
 
 # Fully connected neural network with one hidden layer
@@ -164,8 +168,8 @@ model = RNN( config.hidden_size, config.num_layers, num_classes,config.input_siz
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-model, optimizer, train_loader,val_loader  = accelerator.prepare(
-    model, optimizer, train_loader,val_loader
+model, optimizer, train_loader  = accelerator.prepare(
+    model, optimizer, train_loader
 )
 best_acc = 0
 lr_scheduler = get_scheduler(
@@ -173,7 +177,16 @@ lr_scheduler = get_scheduler(
         optimizer=optimizer,
         num_warmup_steps=int(config.num_epochs*(len(train_loader))*0.1),
         num_training_steps=config.num_epochs*(len(train_loader)),
-    )
+)
+def calculate_class_prb_sum(prediced_prb,labels,class_prob_sum):
+    # add all the corresponding indices of prediced_prb depending on the labels
+    prediced_prb = prediced_prb.to("cpu")
+    labels = labels.to("cpu")
+    for i, label in enumerate(labels):
+        if int(label) not in class_prob_sum:
+            class_prob_sum[int(label)] = prediced_prb[i]
+        class_prob_sum[int(label)] = list(map(lambda x, y: x + y, class_prob_sum[int(label)], prediced_prb[i]))
+    return class_prob_sum
 # Train the model
 n_total_steps = len(train_loader)
 for epoch in range(config.num_epochs):
@@ -212,6 +225,10 @@ for epoch in range(config.num_epochs):
             n_correct = 0
             n_samples = 0
             val_loss = 0
+            prediced_list = []
+            labels_list=[]
+            prediced_prb_list = []
+            class_prob_sum = {}
             for i, values in enumerate(val_loader):
                 # images = torch.nn.functional.one_hot(values["input_values"], num_classes=641).to(device)
                 # images = images.type(torch.float32)
@@ -223,13 +240,47 @@ for epoch in range(config.num_epochs):
                 val_loss += loss.item()
                 # max returns (value ,index)
                 _, predicted = torch.max(outputs.data, 1)
+               
+                prediced_prb = torch.nn.functional.softmax(outputs.data, dim=1)
+
+                prediced_list += predicted.tolist()
                 n_correct += (predicted == labels).sum()
+                class_prob_sum = calculate_class_prb_sum(prediced_prb,labels,class_prob_sum)
+                labels_list += labels.tolist()
             acc = (100.0 * n_correct )/ (len(val_loader)*config.batch_size)
+            print(len(prediced_list))
+            print(len(val_dataset['labels']))
+            f1_score_val = f1_score(labels_list, prediced_list, average='weighted')
+                
             wandb.log({"validation accuracy": acc})
+            wandb.log({"validation f1_score": f1_score_val})
             wandb.log({"validation loss": val_loss/(len(val_loader))})
             print(f'Accuracy of the network on the test images: {acc} %')
+            print(f'f1_score of the network on the test images: {f1_score_val} %')
             if acc > best_acc:
                 best_acc = acc
-                torch.save(model.state_dict(), 'best_model_lstm_batch.pt')
+                torch.save(model.state_dict(), f"best_model_lstm_batch{model_checkpoint.split('/')[-1]}.pt")
                 print('model saved')
                 print(f'Best Accuracy of the network on the test images: {best_acc} %')
+                cf_m = confusion_matrix(labels_list, prediced_list)
+                plt.figure(figsize=(10,10))
+                sns.heatmap(cf_m, annot=True, fmt="d",xticklabels=lang, yticklabels=lang)
+                plt.title("Confusion matrix")
+                plt.ylabel('True label')
+                plt.xlabel('Predicted label')
+                plt.show()
+                #save the plot as png
+                plt.savefig(f"confusion_matrix_{model_checkpoint.split('/')[-1]}.png")
+                plt.figure(figsize=(10,10))
+                class_prob = {}
+                for k,v in class_prob_sum.items():
+                    tensor_list =  list(map(lambda x:'{:.3f}'.format(x),(torch.tensor(v)/torch.tensor(v).sum()).tolist())
+                    class_prob = dict(zip(class_prob_sum.keys(),tensor_list)))
+                    class_prob_sum[k] = class_prob
+                sns.heatmap(pd.DataFrame(class_prob_sum), annot=True, fmt="f",xticklabels=lang, yticklabels=lang)
+                plt.title("Confusion matrix probability")
+                plt.ylabel('True label') 
+                plt.xlabel('Predicted label')
+                plt.show()
+                #save the plot as png
+                plt.savefig(f"confusion_matrix_prob_{model_checkpoint.split('/')[-1]}.png")
