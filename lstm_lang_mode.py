@@ -41,7 +41,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 config = wandb.config
-config.batch_size = 16
+config.batch_size = 8
 config.num_epochs = 500
 # 2. Save model inputs and hyperparameters
 config = wandb.config
@@ -52,7 +52,7 @@ config.num_layers  = 2
 # MNIST dataset 
 lang = ["de","en","es","fr","it","ru"]
 num_classes = len(lang)
-model_checkpoint = "facebook/wav2vec2-base"
+model_checkpoint = "facebook/wav2vec2-large-xlsr-53"
 label2id, id2label,label2id_int = dict(), dict(),dict()
 for i, label in enumerate(lang):
     label2id[label] = torch.tensor(i)
@@ -126,16 +126,16 @@ class RNN(nn.Module):
         # -> x needs to be: (batch_size, seq, input_size)
         
         # or:
-        self.gru = nn.GRU(ninp, hidden_size, num_layers, batch_first=True)
+        self.gru = nn.GRU(ninp, hidden_size, num_layers, batch_first=True,bidirectional=True)
         # self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc1 = nn.Linear(hidden_size, int(hidden_size/2))
-        self.fc2 = nn.Linear(int(hidden_size/2), num_classes)
+        self.fc1 = nn.Linear(hidden_size*2, int(hidden_size))
+        self.fc2 = nn.Linear(int(hidden_size), num_classes)
         
         
     def forward(self, x):
         # Set initial hidden states (and cell states for LSTM)
         x = self.encoder(x)
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device) 
+        h0 = torch.zeros(self.num_layers*2, x.size(0), self.hidden_size).to(device) 
         # c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device) 
         
         # x: (n, 28, 28), h0: (2, n, 128)
@@ -259,7 +259,7 @@ for epoch in range(config.num_epochs):
             print(f'f1_score of the network on the test images: {f1_score_val} %')
             if acc > best_acc:
                 best_acc = acc
-                torch.save(model.state_dict(), f"best_model_lstm_batch{model_checkpoint.split('/')[-1]}.pt")
+                torch.save(model.state_dict(), f"best_model_lstm_batch{model_checkpoint.split('/')[-1]}_bidirectional.pt")
                 print('model saved')
                 print(f'Best Accuracy of the network on the test images: {best_acc} %')
                 cf_m = confusion_matrix(labels_list, prediced_list)
@@ -270,12 +270,16 @@ for epoch in range(config.num_epochs):
                 plt.xlabel('Predicted label')
                 plt.show()
                 #save the plot as png
-                plt.savefig(f"confusion_matrix_{model_checkpoint.split('/')[-1]}.png")
+                plt.savefig(f"confusion_matrix_{model_checkpoint.split('/')[-1]}_bidirectional.png")
                 plt.figure(figsize=(10,10))
                 class_prob = {}
                 for k,v in class_prob_sum.items():
-                    tensor_list =  list(map(lambda x:'{:.3f}'.format(x),(torch.tensor(v)/torch.tensor(v).sum()).tolist())
-                    class_prob = dict(zip(class_prob_sum.keys(),tensor_list)))
+                    lst = np.array((torch.tensor(v)/torch.tensor(v).sum()).tolist())
+                    #for each element in "a" round it to 3 decimal points and removing the extra trailing zeroes
+                    tensor_list = [round(elem, 3) for elem in lst]
+                    # tensor_list =  np.around(np.array((torch.tensor(v)/torch.tensor(v).sum()).tolist()), decimals=3).reshape(-1)
+                
+                    class_prob = dict(zip(class_prob_sum.keys(),tensor_list))
                     class_prob_sum[k] = class_prob
                 sns.heatmap(pd.DataFrame(class_prob_sum), annot=True, fmt="f",xticklabels=lang, yticklabels=lang)
                 plt.title("Confusion matrix probability")
@@ -283,4 +287,4 @@ for epoch in range(config.num_epochs):
                 plt.xlabel('Predicted label')
                 plt.show()
                 #save the plot as png
-                plt.savefig(f"confusion_matrix_prob_{model_checkpoint.split('/')[-1]}.png")
+                plt.savefig(f"confusion_matrix_prob_{model_checkpoint.split('/')[-1]}_bidirectional.png")
