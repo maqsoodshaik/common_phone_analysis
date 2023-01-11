@@ -49,10 +49,11 @@ config.learning_rate = 1e-3
 config.one_hot = True
 config.hidden_size = 1024
 config.num_layers  = 2
+config.direction = "mono"
 # MNIST dataset 
 lang = ["de","en","es","fr","it","ru"]
 num_classes = len(lang)
-model_checkpoint = "facebook/wav2vec2-base"
+model_checkpoint = "facebook/wav2vec2-large-xlsr-53"
 label2id, id2label,label2id_int = dict(), dict(),dict()
 for i, label in enumerate(lang):
     label2id[label] = torch.tensor(i)
@@ -274,8 +275,12 @@ for epoch in range(config.num_epochs):
                 plt.figure(figsize=(10,10))
                 class_prob = {}
                 for k,v in class_prob_sum.items():
-                    tensor_list =  list(map(lambda x:'{:.3f}'.format(x),(torch.tensor(v)/torch.tensor(v).sum()).tolist())
-                    class_prob = dict(zip(class_prob_sum.keys(),tensor_list)))
+                    lst = np.array((torch.tensor(v)/torch.tensor(v).sum()).tolist())
+                    #for each element in "a" round it to 3 decimal points and removing the extra trailing zeroes
+                    tensor_list = [round(elem, 3) for elem in lst]
+                    # tensor_list =  np.around(np.array((torch.tensor(v)/torch.tensor(v).sum()).tolist()), decimals=3).reshape(-1)
+                
+                    class_prob = dict(zip(class_prob_sum.keys(),tensor_list))
                     class_prob_sum[k] = class_prob
                 sns.heatmap(pd.DataFrame(class_prob_sum), annot=True, fmt="f",xticklabels=lang, yticklabels=lang)
                 plt.title("Confusion matrix probability")
