@@ -49,10 +49,18 @@ config.learning_rate = 1e-3
 config.one_hot = True
 config.hidden_size = 1024
 config.num_layers  = 2
+config.direction = "bidirectional"
 # MNIST dataset 
 lang = ["de","en","es","fr","it","ru"]
 num_classes = len(lang)
-model_checkpoint = "facebook/wav2vec2-large-xlsr-53"
+model_checkpoint = "facebook/wav2vec2-base"
+if model_checkpoint == "facebook/wav2vec2-base":
+    train_dataset_path = "train_dataset_wav2vec2"
+    val_dataset_path = "val_dataset_wav2vec2"
+else:
+    train_dataset_path = "train_dataset"
+    val_dataset_path = "val_dataset"
+config.model = model_checkpoint
 label2id, id2label,label2id_int = dict(), dict(),dict()
 for i, label in enumerate(lang):
     label2id[label] = torch.tensor(i)
@@ -74,9 +82,9 @@ def data_extract(model_checkpoint, dataset_path_m,file_to_extract):
             #yield dictioanry with the audio feature and the label
             yield {"input_values":torch.tensor(mdl_out).unsqueeze(dim = 0),"labels":torch.tensor(label2id[l]).unsqueeze(dim = 0)}
 #load_from_disk if train_dataset contains the data
-if os.path.exists("train_dataset_wav2vec2")and os.path.exists("val_dataset_wav2vec2") :
-    train_dataset = Dataset.load_from_disk("train_dataset_wav2vec2")
-    val_dataset = Dataset.load_from_disk("val_dataset_wav2vec2")
+if os.path.exists(train_dataset_path)and os.path.exists(val_dataset_path) :
+    train_dataset = Dataset.load_from_disk(train_dataset_path)
+    val_dataset = Dataset.load_from_disk(val_dataset_path)
     # test_dataset = Dataset.load_from_disk("test_dataset")
 else:
     file_to_extract = "train.csv"
